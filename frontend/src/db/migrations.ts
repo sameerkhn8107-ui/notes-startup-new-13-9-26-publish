@@ -12,7 +12,7 @@
 import type * as SQLite from "expo-sqlite";
 import * as FileSystem from "expo-file-system/legacy";
 
-export const LATEST_SCHEMA_VERSION = 1;
+export const LATEST_SCHEMA_VERSION = 2;
 
 const DB_DIR = FileSystem.documentDirectory + "SQLite/";
 const DB_FILE = DB_DIR + "notes_app.db";
@@ -106,6 +106,23 @@ const MIGRATIONS: Migration[] = [
     },
     validate: async (db) => {
       return (await tableExists(db, "pages")) && (await tableExists(db, "blocks"));
+    },
+  },
+  {
+    version: 2,
+    up: async (db) => {
+      // Single key/value document store for all M2-M7 workspace entities
+      // (databases, properties, records, views, comments, tasks, projects,
+      // reminders, version history, template metadata). Additive & safe.
+      await db.execAsync(`
+        CREATE TABLE IF NOT EXISTS kv (
+          key TEXT PRIMARY KEY NOT NULL,
+          value TEXT NOT NULL DEFAULT '{}'
+        );
+      `);
+    },
+    validate: async (db) => {
+      return await tableExists(db, "kv");
     },
   },
 ];

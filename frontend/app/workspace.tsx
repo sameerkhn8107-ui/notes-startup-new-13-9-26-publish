@@ -201,6 +201,15 @@ export default function Workspace() {
         </Pressable>
         <Text style={[styles.heading, { color: c.onSurface }]}>Workspace</Text>
         <View style={styles.topActions}>
+          <Pressable testID="workspace-search-nav" onPress={() => router.push("/search")} style={styles.iconBtn} hitSlop={6}>
+            <MaterialCommunityIcons name="magnify" size={22} color={c.onSurface} />
+          </Pressable>
+          <Pressable testID="workspace-templates" onPress={() => router.push("/templates")} style={styles.iconBtn} hitSlop={6}>
+            <MaterialCommunityIcons name="shape-outline" size={22} color={c.onSurface} />
+          </Pressable>
+          <Pressable testID="workspace-calendar" onPress={() => router.push("/calendar")} style={styles.iconBtn} hitSlop={6}>
+            <MaterialCommunityIcons name="calendar-month-outline" size={22} color={c.onSurface} />
+          </Pressable>
           <Pressable
             testID="workspace-trash"
             onPress={() => setMode((m) => (m === "trash" ? "tree" : "trash"))}
@@ -295,6 +304,11 @@ export default function Workspace() {
           <EmptyState icon="file-tree" title="No pages yet" subtitle="Tap + to create your first page." testID="empty-workspace" />
         ) : (
           <>
+            <Pressable testID="workspace-attachments" onPress={() => router.push("/attachments")} style={[styles.favRow, { marginBottom: 4 }]}>
+              <MaterialCommunityIcons name="paperclip" size={16} color={c.brand} />
+              <Text style={[styles.nodeTitle, { color: c.onSurface }]}>Attachment Manager</Text>
+              <MaterialCommunityIcons name="chevron-right" size={18} color={c.muted} />
+            </Pressable>
             {favorites.length > 0 && (
               <View style={styles.section}>
                 <Text style={[styles.sectionTitle, { color: c.muted }]}>FAVORITES</Text>

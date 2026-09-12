@@ -413,3 +413,21 @@ export async function replacePageBlocks(
   if (page) page.updatedAt = ts;
   await save();
 }
+
+// ---------- M2: links / backlinks / global search helpers ----------
+export async function getAllBlocks(): Promise<Block[]> {
+  const db = await load();
+  return db.blocks.slice();
+}
+
+export async function findPageByTitle(title: string): Promise<Page | null> {
+  const db = await load();
+  const t = title.trim().toLowerCase();
+  return db.pages.find((p) => !p.isDeleted && p.title.trim().toLowerCase() === t) ?? null;
+}
+
+export async function ensurePageByTitle(title: string): Promise<Page> {
+  const existing = await findPageByTitle(title);
+  if (existing) return existing;
+  return createPage(null, { title: title.trim() });
+}

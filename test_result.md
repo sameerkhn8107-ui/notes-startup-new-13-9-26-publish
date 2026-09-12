@@ -415,3 +415,32 @@ agent_communication:
       Notes app unaffected; no crashes/white screens. Migration: native user_version + .bak snapshot
       + validate + rollback; web schemaVersion + backup. Existing notes schema untouched.
       Awaiting user go-ahead for M2 (Page Links + Backlinks + @Mentions + Global Search).
+    -agent: "main"
+    -message: |
+      M2-M7 IMPLEMENTED (continued from M1, all additive; migration user_version -> v2 adds `kv` table;
+      new M2-M7 entities persist in one JSON doc via platform KV: SQLite `kv` native / AsyncStorage web).
+      M2 Links/Backlinks/@Mentions/Search: [[link]] & @mention parsing (src/lib/links.ts), inline
+        autocomplete suggestion bar with create-if-missing, Links & Backlinks section on page, global
+        /search screen across pages/blocks/notes/tasks/records with path.
+      M3 Databases: /database/[id] with Table/Board/List/Calendar/Gallery views, properties (all 15
+        types), records, add view/property, records-as-pages ("Open as page"). Databases section on pages.
+      M4 Relations/Rollups/Formula: relation picker, rollup (count/completed/sum/avg/min/max/earliest/
+        latest), safe sandboxed FormulaEngine (src/lib/formula.ts: arithmetic, comparison, IF/AND/OR/NOT,
+        SUM/AVERAGE/MIN/MAX/COUNT/COUNTA/ROUND/ABS/DATE/TODAY/DATE_DIFF/DAYS_REMAINING/CONCAT/LENGTH/
+        LOWER/UPPER, prop() refs) with error objects (never corrupts data). computeContext resolves values.
+      M5 Tasks/Calendar/Reminders: /calendar with Month/Week/Day/Agenda, tasks (status/priority/due),
+        create/edit/toggle/delete; expo-notifications installed + guarded scheduler (src/lib/reminders.ts,
+        graceful no-op on web / when unavailable).
+      M6 Templates: EXACTLY 60 real templates (src/data/templates.ts) with blocks + databases + sample
+        records + views; /templates library with categories/search/favorites/recent/preview/Use; install
+        clones with fresh IDs (independent copies).
+      M7 Version History + Attachments + Backup: /versions/[pageId] (save/list/preview/restore w/ safety
+        snapshot + 30 retention), /attachments manager (files + page images, sizes, delete), workspace-store
+        exportWorkspaceDoc/importWorkspaceDoc, migration snapshots (.bak) + rollback path.
+      VERIFIED via direct automation: template install -> page with H1/callout + Habits database +
+        comments; database Table view (props + record) and Board view (grouped by select) render; workspace
+        header nav (search/templates/calendar/trash/new) renders. Lint clean. No crashes. Existing Notes app
+        regression intact. Native is priority; web functional.
+      KNOWN LIMITATION: the Settings unified backup file currently covers Notes; workspace backup/restore is
+        available at the data layer (exportWorkspaceDoc/importWorkspaceDoc) but not yet wired into that one
+        Settings button. Large-dataset virtualization is a follow-up perf pass.

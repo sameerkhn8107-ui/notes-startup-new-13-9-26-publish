@@ -33,14 +33,29 @@ import {
   deletePageCascade,
   deletePageReparent,
   duplicatePage,
+  ensurePageByTitle,
+  findPageByTitle,
+  getAllBlocks,
   getBlocks,
   getBreadcrumb,
   getPage,
   listChildPages,
   makeBlock,
   replacePageBlocks,
+  searchPages,
   updatePage,
 } from "@/src/db/pages-repo";
+import { extractLinks, detectTrigger, applyTrigger } from "@/src/lib/links";
+import {
+  addComment,
+  createDatabase,
+  deleteComment,
+  listDatabasesForPage,
+  listPageComments,
+  saveVersion,
+  updateComment,
+} from "@/src/db/workspace-store";
+import { Comment, Database } from "@/src/db/workspace-types";
 
 // ---------- pure block-array helpers ----------
 
@@ -169,12 +184,27 @@ export default function PageEditor() {
   const [pageMenu, setPageMenu] = useState(false);
   const [deleteChoice, setDeleteChoice] = useState(false);
   const [iconPicker, setIconPicker] = useState(false);
+  const [databases, setDatabases] = useState<Database[]>([]);
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [commentText, setCommentText] = useState("");
+  const [outLinks, setOutLinks] = useState<string[]>([]);
+  const [backlinks, setBacklinks] = useState<{ id: string; title: string }[]>([]);
+  const [trigger, setTrigger] = useState<{ blockId: string; type: "link" | "mention"; query: string } | null>(null);
+  const [suggestions, setSuggestions] = useState<{ id: string; title: string }[]>([]);
 
   const history = useBlockHistory([]);
   const loadedRef = useRef(false);
   const latestRef = useRef<Block[]>([]);
 
   latestRef.current = history.blocks;
+
+  useEffect(() => {
+    const titles = new Set<string>();
+    for (const b of history.blocks) {
+      for (const t of extractLinks(parseBlockContent(b.content).text)) titles.add(t.title);
+    }
+    setOutLinks(Array.from(titles));
+  }, [history.blocks]);
 
   const loadMeta = useCallback(async () => {
     try {
@@ -184,6 +214,28 @@ export default function PageEditor() {
         subs.map(async (s) => ({ ...s, kids: await childCount(s.id) })),
       );
       setSubpages(withKids);
+      setDatabases(await listDatabasesForPage(pageId));
+      setComments(await listPageComments(pageId));
+      // backlinks: scan all blocks for [[thisTitle]] / @thisTitle
+      const me = await getPage(pageId);
+      const myTitle = (me?.title || "").trim().toLowerCase();
+      if (myTitle) {
+        const all = await getAllBlocks();
+        const hits = new Map<string, string>();
+        for (const b of all) {
+          if (b.pageId === pageId) continue;
+          const toks = extractLinks(parseBlockContent(b.content).text);
+          if (toks.some((t) => t.title.trim().toLowerCase() === myTitle)) {
+            if (!hits.has(b.pageId)) {
+              const pg = await getPage(b.pageId);
+              if (pg && !pg.isDeleted) hits.set(b.pageId, pg.title || "Untitled");
+            }
+          }
+        }
+        setBacklinks(Array.from(hits, ([id, title]) => ({ id, title })));
+      } else {
+        setBacklinks([]);
+      }
     } catch (e) {
       console.warn("[page] meta load failed", e);
     }
@@ -257,8 +309,50 @@ export default function PageEditor() {
   // block mutation helpers -----------------------------------------------
   const setBlocks = (next: Block[], coalesceKey?: string) => history.set(next, coalesceKey);
 
-  const onChangeText = (id: string, text: string) =>
+  const onChangeText = (id: string, text: string) => {
     setBlocks(patchContent(history.blocks, id, { text }), `text:${id}`);
+    const trig = detectTrigger(text);
+    if (trig && trig.query.length >= 0) {
+      setTrigger({ blockId: id, type: trig.type, query: trig.query });
+      searchPages(trig.query).then((pgs) =>
+        setSuggestions(pgs.slice(0, 6).map((p) => ({ id: p.id, title: p.title || "Untitled" }))),
+      );
+    } else {
+      setTrigger(null);
+      setSuggestions([]);
+    }
+  };
+
+  const pickSuggestion = (title: string) => {
+    if (!trigger) return;
+    const blk = history.blocks.find((b) => b.id === trigger.blockId);
+    if (!blk) return;
+    const curText = parseBlockContent(blk.content).text || "";
+    const nextText = applyTrigger(curText, trigger.type, title);
+    setBlocks(patchContent(history.blocks, trigger.blockId, { text: nextText }));
+    setTrigger(null);
+    setSuggestions([]);
+    // recompute link chips shortly after
+    setTimeout(() => recomputeOutLinks(), 100);
+  };
+
+  const recomputeOutLinks = () => {
+    const titles = new Set<string>();
+    for (const b of latestRef.current) {
+      for (const t of extractLinks(parseBlockContent(b.content).text)) titles.add(t.title);
+    }
+    setOutLinks(Array.from(titles));
+  };
+
+  const openLink = async (title: string) => {
+    try {
+      const pg = await ensurePageByTitle(title);
+      refresh();
+      router.push({ pathname: "/page/[id]", params: { id: pg.id } });
+    } catch {
+      toast.show("Couldn't open link", "error");
+    }
+  };
   const onToggleCheck = (id: string) => {
     const cur = parseBlockContent(history.blocks.find((b) => b.id === id)?.content);
     setBlocks(patchContent(history.blocks, id, { checked: !cur.checked }));
@@ -472,7 +566,89 @@ export default function PageEditor() {
               </Pressable>
             ))
           )}
+
+          {/* Links & Backlinks */}
+          {(outLinks.length > 0 || backlinks.length > 0) && (
+            <>
+              <Text style={[styles.subHeader, { color: c.muted, marginTop: 24 }]}>LINKS & BACKLINKS</Text>
+              <View style={styles.chipsWrap}>
+                {outLinks.map((t) => (
+                  <Pressable key={`out-${t}`} testID={`link-${t}`} onPress={() => openLink(t)} style={[styles.linkChip, { backgroundColor: c.brandTertiary }]}>
+                    <MaterialCommunityIcons name="link-variant" size={13} color={c.onBrandTertiary} />
+                    <Text style={[styles.linkChipText, { color: c.onBrandTertiary }]}>{t}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              {backlinks.map((bl) => (
+                <Pressable key={`bl-${bl.id}`} testID={`backlink-${bl.id}`} onPress={() => router.push({ pathname: "/page/[id]", params: { id: bl.id } })} style={styles.backlinkRow}>
+                  <MaterialCommunityIcons name="arrow-left-top" size={16} color={c.muted} />
+                  <Text style={[styles.backlinkText, { color: c.onSurfaceTertiary }]}>{bl.title}</Text>
+                </Pressable>
+              ))}
+            </>
+          )}
+
+          {/* Databases */}
+          <View style={styles.subHeaderRow}>
+            <Text style={[styles.subHeader, { color: c.muted }]}>DATABASES</Text>
+            <Pressable testID="add-database" onPress={async () => { const db = await createDatabase(pageId, "Untitled Database"); refresh(); router.push({ pathname: "/database/[id]", params: { id: db.id } }); }} hitSlop={8} style={styles.addSubBtn}>
+              <MaterialCommunityIcons name="plus" size={16} color={c.brand} />
+              <Text style={[styles.addSubText, { color: c.brand }]}>New</Text>
+            </Pressable>
+          </View>
+          {databases.length === 0 ? (
+            <Text style={[styles.noSub, { color: c.muted }]}>No databases yet.</Text>
+          ) : databases.map((db) => (
+            <Pressable key={db.id} testID={`db-${db.id}`} onPress={() => router.push({ pathname: "/database/[id]", params: { id: db.id } })} style={[styles.subRow, { borderColor: c.border, backgroundColor: c.surfaceSecondary }]}>
+              <Text style={styles.subIcon}>{db.icon}</Text>
+              <Text numberOfLines={1} style={[styles.subTitle, { color: c.onSurface }]}>{db.title}</Text>
+              <MaterialCommunityIcons name="chevron-right" size={20} color={c.muted} />
+            </Pressable>
+          ))}
+
+          {/* Comments */}
+          <Text style={[styles.subHeader, { color: c.muted, marginTop: 24 }]}>COMMENTS</Text>
+          {comments.map((cm) => (
+            <View key={cm.id} style={[styles.commentRow, { borderColor: c.border, backgroundColor: c.surfaceSecondary, opacity: cm.resolved ? 0.55 : 1 }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.commentText, { color: c.onSurface }, cm.resolved && { textDecorationLine: "line-through" }]}>{cm.text}</Text>
+                <Text style={[styles.commentMeta, { color: c.muted }]}>{new Date(cm.createdAt).toLocaleDateString()}</Text>
+              </View>
+              <Pressable testID={`cmt-resolve-${cm.id}`} onPress={async () => { await updateComment(cm.id, { resolved: cm.resolved ? 0 : 1 }); setComments(await listPageComments(pageId)); }} hitSlop={6}>
+                <MaterialCommunityIcons name={cm.resolved ? "restore" : "check-circle-outline"} size={18} color={cm.resolved ? c.muted : c.success} />
+              </Pressable>
+              <Pressable testID={`cmt-del-${cm.id}`} onPress={async () => { await deleteComment(cm.id); setComments(await listPageComments(pageId)); }} hitSlop={6}>
+                <MaterialCommunityIcons name="trash-can-outline" size={16} color={c.muted} />
+              </Pressable>
+            </View>
+          ))}
+          <View style={styles.commentInputRow}>
+            <TextInput testID="comment-input" value={commentText} onChangeText={setCommentText} placeholder="Add a comment" placeholderTextColor={c.muted} style={[styles.commentInput, { color: c.onSurface, borderColor: c.border }]} />
+            <Pressable testID="comment-add" onPress={async () => { if (!commentText.trim()) return; await addComment("page", pageId, pageId, commentText.trim()); setCommentText(""); setComments(await listPageComments(pageId)); }} style={[styles.commentSend, { backgroundColor: c.brand }]}>
+              <MaterialCommunityIcons name="send" size={18} color={c.onBrand} />
+            </Pressable>
+          </View>
         </ScrollView>
+
+        {/* Link / mention autocomplete bar */}
+        {trigger && suggestions.length + 1 > 0 && (
+          <View style={[styles.suggestBar, { backgroundColor: c.surfaceSecondary, borderColor: c.border }]}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, alignItems: "center", paddingHorizontal: 8 }} keyboardShouldPersistTaps="handled">
+              <Text style={[styles.suggestHint, { color: c.muted }]}>{trigger.type === "link" ? "[[link]]" : "@mention"}</Text>
+              {suggestions.map((s) => (
+                <Pressable key={s.id} testID={`suggest-${s.id}`} onPress={() => pickSuggestion(s.title)} style={[styles.suggestChip, { backgroundColor: c.brandTertiary }]}>
+                  <Text style={[styles.suggestChipText, { color: c.onBrandTertiary }]}>{s.title}</Text>
+                </Pressable>
+              ))}
+              {trigger.query.trim().length > 0 && !suggestions.some((s) => s.title.toLowerCase() === trigger.query.trim().toLowerCase()) && (
+                <Pressable testID="suggest-create" onPress={() => pickSuggestion(trigger.query.trim())} style={[styles.suggestChip, { backgroundColor: c.surfaceTertiary }]}>
+                  <MaterialCommunityIcons name="plus" size={13} color={c.onSurface} />
+                  <Text style={[styles.suggestChipText, { color: c.onSurface }]}>Create &quot;{trigger.query.trim()}&quot;</Text>
+                </Pressable>
+              )}
+            </ScrollView>
+          </View>
+        )}
 
         {/* Bottom toolbar */}
         <View style={[styles.toolbar, { backgroundColor: c.surfaceSecondary, borderColor: c.border, paddingBottom: insets.bottom + 8 }]}>
@@ -528,6 +704,8 @@ export default function PageEditor() {
         />
         <MenuItem icon="file-plus-outline" label="Add sub-page" onPress={() => { setPageMenu(false); goCreateChild(); }} />
         <MenuItem icon="content-duplicate" label="Duplicate page" onPress={onDuplicatePage} />
+        <MenuItem icon="history" label="Save version" onPress={async () => { setPageMenu(false); await saveVersion({ pageId, title, icon, blocks: latestRef.current, label: "Manual save" }); toast.show("Version saved", "success"); }} />
+        <MenuItem icon="clock-outline" label="Version history" onPress={() => { setPageMenu(false); router.push({ pathname: "/versions/[pageId]", params: { pageId } }); }} />
         <MenuItem icon="trash-can-outline" label="Delete page" destructive onPress={() => { setPageMenu(false); setDeleteChoice(true); }} />
       </BottomSheet>
 
@@ -652,4 +830,19 @@ const styles = StyleSheet.create({
   emojiGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, paddingVertical: 4 },
   emojiBtn: { width: 52, height: 52, borderRadius: 14, alignItems: "center", justifyContent: "center" },
   emojiBig: { fontSize: 26 },
+  chipsWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 6 },
+  linkChip: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999 },
+  linkChipText: { fontSize: 13, fontWeight: "600" },
+  backlinkRow: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 6 },
+  backlinkText: { fontSize: 14, fontWeight: "500" },
+  commentRow: { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, padding: 12, marginBottom: 8 },
+  commentText: { fontSize: 14 },
+  commentMeta: { fontSize: 11, marginTop: 3 },
+  commentInputRow: { flexDirection: "row", gap: 8, marginTop: 6 },
+  commentInput: { flex: 1, borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14 },
+  commentSend: { width: 46, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  suggestBar: { borderTopWidth: StyleSheet.hairlineWidth, paddingVertical: 8 },
+  suggestHint: { fontSize: 12, fontWeight: "700", paddingHorizontal: 4 },
+  suggestChip: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999 },
+  suggestChipText: { fontSize: 13, fontWeight: "600" },
 });

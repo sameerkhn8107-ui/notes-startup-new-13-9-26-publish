@@ -467,3 +467,24 @@ export async function replacePageBlocks(
     ]);
   });
 }
+
+// ---------- M2: links / backlinks / global search helpers ----------
+export async function getAllBlocks(): Promise<Block[]> {
+  const db = await getDb();
+  return db.getAllAsync<Block>(`SELECT * FROM blocks ORDER BY pageId, orderIndex ASC`);
+}
+
+export async function findPageByTitle(title: string): Promise<Page | null> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<Page>(
+    `SELECT * FROM pages WHERE isDeleted = 0 AND LOWER(title) = LOWER(?) ORDER BY updatedAt DESC LIMIT 1`,
+    [title.trim()],
+  );
+  return row ?? null;
+}
+
+export async function ensurePageByTitle(title: string): Promise<Page> {
+  const existing = await findPageByTitle(title);
+  if (existing) return existing;
+  return createPage(null, { title: title.trim() });
+}

@@ -449,6 +449,11 @@ export async function deleteAttachment(id: string): Promise<void> {
 
 // ---------- Stats ----------
 
+export async function listAllAttachments(): Promise<Attachment[]> {
+  const db = await getDb();
+  return db.getAllAsync<Attachment>(`SELECT * FROM attachments ORDER BY createdAt DESC`);
+}
+
 export async function getStats(): Promise<{
   noteCount: number;
   attachmentCount: number;

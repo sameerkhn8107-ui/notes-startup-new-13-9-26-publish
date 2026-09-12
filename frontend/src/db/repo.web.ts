@@ -377,6 +377,11 @@ export async function deleteAttachment(id: string): Promise<void> {
 
 // ---------- Stats ----------
 
+export async function listAllAttachments(): Promise<Attachment[]> {
+  const db = await load();
+  return db.attachments.slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
 export async function getStats(): Promise<{ noteCount: number; attachmentCount: number }> {
   const db = await load();
   return {
