@@ -270,6 +270,10 @@ export default function Home() {
               );
             })}
             <View style={[styles.chipDivider, { backgroundColor: c.border }]} />
+            <Pressable testID="filter-pages" onPress={() => router.push("/workspace")} style={[styles.chip, { backgroundColor: c.brandTertiary, borderColor: c.brand }]}>
+              <MaterialCommunityIcons name="file-tree" size={15} color={c.brand} />
+              <Text style={[styles.chipText, { color: c.brand }]}>Pages</Text>
+            </Pressable>
             <Pressable testID="filter-folders" onPress={() => router.push("/folders")} style={[styles.chip, { backgroundColor: c.surfaceSecondary, borderColor: c.border }]}>
               <MaterialCommunityIcons name="folder-outline" size={15} color={c.onSurfaceTertiary} />
               <Text style={[styles.chipText, { color: c.onSurfaceTertiary }]}>Folders</Text>

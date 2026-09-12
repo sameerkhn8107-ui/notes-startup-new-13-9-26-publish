@@ -1,5 +1,7 @@
 import * as SQLite from "expo-sqlite";
 
+import { runMigrations } from "./migrations";
+
 let dbInstance: SQLite.SQLiteDatabase | null = null;
 let initPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
@@ -80,6 +82,13 @@ export async function getDb(): Promise<SQLite.SQLiteDatabase> {
   initPromise = (async () => {
     const db = await SQLite.openDatabaseAsync("notes_app.db");
     await db.execAsync(SCHEMA);
+    // Apply versioned, additive migrations (pages/blocks for the Workspace).
+    // Failures here are swallowed so the core notes app always stays usable.
+    try {
+      await runMigrations(db);
+    } catch (e) {
+      console.warn("[database] migrations failed (app continues)", e);
+    }
     dbInstance = db;
     return db;
   })();
